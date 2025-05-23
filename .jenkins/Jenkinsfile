@@ -1,0 +1,50 @@
+pipeline {
+    agent any
+    tools {
+        maven 'Maven 3.9.6'
+        jdk   'jdk17'
+    }
+    environment {
+        SONAR_TOKEN = credentials('sonar-token')
+        DOCKERHUB_CREDS = credentials('dockerhub')
+    }
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+        stage('Build & Unit Tests') {
+            steps { sh 'mvn -B clean verify' }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('LocalSonar') {
+                    sh 'mvn -B sonar:sonar'
+                }
+            }
+        }
+        stage('Docker Build') {
+            steps {
+                script {
+                    imageTag = "niranjangade/petclinic:${env.BUILD_NUMBER}"
+                }
+                sh "docker build -t ${imageTag} ."
+            }
+        }
+        stage('Docker Push') {
+            steps {
+                sh "echo $DOCKERHUB_CREDS_PSW | docker login -u $DOCKERHUB_CREDS_USR --password-stdin"
+                sh "docker push ${imageTag}"
+            }
+        }
+        stage('Deploy Locally') {
+            steps {
+                sh 'docker rm -f petclinic || true'
+                sh "docker run -d --name petclinic -p 8080:8080 ${imageTag}"
+            }
+        }
+    }
+    post {
+        always { cleanWs() }
+    }
+}
+
